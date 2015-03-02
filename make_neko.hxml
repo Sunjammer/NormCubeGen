@@ -1,0 +1,4 @@
+-lib format
+-cp src
+-neko bin/NormCubeGen.n
+-main NormCubeGen

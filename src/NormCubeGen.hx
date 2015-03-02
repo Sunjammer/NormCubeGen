@@ -1,6 +1,5 @@
 package;
 
-import format.tools.BufferInput;
 import haxe.io.Bytes;
 import haxe.io.BytesBuffer;
 import haxe.io.BytesOutput;
@@ -9,12 +8,19 @@ import haxe.Timer;
 import format.png.Writer;
 import format.png.Data;
 import format.png.Tools;
+
+#if (cpp||neko)
 import sys.FileSystem;
 import sys.io.File;
 import sys.io.FileOutput;
+#end
 
+#if cpp
 import cpp.Lib;
 import cpp.vm.Thread;
+#elseif neko
+import neko.Lib;
+#end
 
 /**
  * Generate 6-sided range compressed normalization RGB cubemap as 6 png images.
@@ -59,7 +65,9 @@ class NormCubeGen
 {
 	
 	static function genFace(idx:Int, size:Int, halfsize:Float, offset:Float) {
+		#if cpp
 		var main:Thread = Thread.readMessage(true);
+		#end
 		var data = new BytesOutput();
 		var vec = new V3();
 		var progress = 0.0;
@@ -101,12 +109,17 @@ class NormCubeGen
 		}
 		var name = "NormalizeCube_" + facing + ".png";
 		
-		main.sendMessage({name:name, data:pngData});
+		#if cpp
+		main.sendMessage( { name:name, data:pngData } );
+		#elseif neko
+		return { name:name, data:pngData };
+		#end
 	}
 	
-	static inline function toHex(r:Float, g:Float, b:Float):Int {
-		return Std.int(r * 255) << 16 | Std.int(g * 255) << 8 | Std.int(b * 255);
+	static inline function println(o) {
+		Lib.println(o);
 	}
+	
 	static function main() 
 	{
 		var faceSize = 128;
@@ -119,34 +132,42 @@ class NormCubeGen
 				case "-size":
 					faceSize = Std.parseInt(b);
 					if (faceSize == 0) {
-						Lib.println("Invalid size argument (Must be int higher than 0)");
+						println("Invalid size argument (Must be int higher than 0)");
 						return;
 					}
 				case "-out":
 					outPath = b;
 				default:
-					Lib.println("Unrecognized argument '" + a + "'");
+					println("Unrecognized argument '" + a + "'");
 					return;
 			}
 		}
 		var offset = 0.5;
 		var halfsize = faceSize * 0.5;
-		var temp:V3;
+		#if cpp
 		var workers = [];
+		#elseif neko
+		var faces = [];
+		#end
 		
 		var time = Timer.stamp();
 		
 		for (face in 0...6)
 		{
+			#if cpp
 			var worker = Thread.create(genFace.bind(face, faceSize, halfsize, offset));
 			worker.sendMessage(Thread.current());
 			workers.push(worker);
+			#elseif neko
+			faces.push(genFace(face, faceSize, halfsize, offset));
+			#end
 		}
 		
 		if (!FileSystem.exists(outPath)) {
 			FileSystem.createDirectory(outPath);
 		}
 		
+		#if cpp
 		while(workers.length>0){
 			var result = Thread.readMessage(true);
 			var out = File.write(outPath+"/"+result.name, true);
@@ -154,13 +175,23 @@ class NormCubeGen
 			w.write(result.data);
 			out.close();
 			
-			Sys.println("Created " + result.name);
+			println("Created " + result.name);
 			workers.pop();
 		}
+		#elseif neko
+		for(f in faces){
+			var out = File.write(outPath+"/"+f.name, true);
+			var w = new Writer(out);
+			w.write(f.data);
+			out.close();
+			
+			println("Created " + f.name);
+		}
+		#end
 		
 		var delta = Timer.stamp() - time;
 		
-		Sys.println("Finished in "+delta+" seconds");
+		println("Finished in " + delta + " seconds");
 
 	}
 	
